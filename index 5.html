@@ -1,0 +1,443 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#4fb3ff"><link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png"><title>Operation Center</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:system-ui,sans-serif;color:var(--fg);background:#2e8fe8;--fg:#0b1f33;--card:rgba(255,255,255,.82)}
+body.dark{--fg:#fff;--card:rgba(8,10,40,.58)}
+#sky{position:fixed;inset:0;z-index:-1}#sky svg{width:100%;height:100%;display:block}
+#app{max-width:560px;margin:auto;padding:max(14px,env(safe-area-inset-top)) 14px 40px}
+h1{font-size:1.4rem;margin:.3em 0}h2{font-size:1.05rem;margin:1em 0 .4em}
+.hd{background:var(--card);padding:6px 12px;border-radius:14px;display:inline-block}
+button{border:0;border-radius:12px;padding:10px 14px;background:var(--card);color:var(--fg);font-size:1rem}
+.card{background:var(--card);border-radius:16px;padding:12px;margin:8px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tile{padding:18px 8px;text-align:center;font-weight:600}.tile span{display:block;font-size:1.8rem}
+input,select,textarea{width:100%;padding:10px;border-radius:10px;border:0;margin:4px 0;font-size:1rem;background:#fff;color:#10243a}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}.row>button{flex:0 0 auto}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(128,128,128,.3)}
+.item:last-child{border:0}.done{text-decoration:line-through;opacity:.65}
+.amp{border-radius:16px;padding:14px;color:#fff;font-weight:600}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}.cal b{padding:8px 0;border-radius:10px;background:var(--c,transparent);border:2px solid transparent;font-weight:500;font-size:.9rem}.cal b.on{border-color:var(--fg)}
+.bar{height:10px;border-radius:5px}small{opacity:.9}
+.rpe{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:8px 0}.rpe button{background:#fff;color:#10243a;font-weight:700}
+details{margin:10px 0}summary{font-weight:600}details p{margin:.5em 0;line-height:1.4}
+.badge{} input[type=checkbox]{width:auto;margin:0}
+#grid{display:grid;grid-template-columns:36px repeat(7,1fr);touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#grid .hd2{position:sticky;top:0;z-index:2;background:#fff;color:#0b1f33;text-align:center;font-size:.8rem;padding:4px 0;font-weight:700}
+#grid .tl{font-size:.65rem;height:var(--rh);line-height:var(--rh);text-align:right;padding-right:4px}
+#grid .tl.h,#grid .c.h{border-top:1px solid rgba(0,0,0,.35)}
+#grid .c{height:var(--rh);border-left:1px solid rgba(0,0,0,.1);background:rgba(255,255,255,.55)}
+#grid .c.s{background:#2f7fd8}#grid .c.t{background:#f08a4b}
+.badge{font-size:.7rem;background:#fff;color:#10243a;border-radius:8px;padding:2px 6px;margin-left:6px}
+</style></head><body><div id="sky"></div><div id="app"></div>
+<script>
+const $=s=>document.querySelector(s),K='opcenter2';
+const def={events:[],think:[],wellness:[],wlog:[],shop:[],train:[],wishes:[],routines:[],checks:{},rpe:{},tasks:[],clean:[],recur:[],grid:{},kplans:[],klogs:[],kact:null,free:[],skip:[],inj:[],shots:[],tlog:[]};
+let D=Object.assign({},def,JSON.parse(localStorage.getItem(K)||'{}'));
+function uid(){return Math.random().toString(36).slice(2,9)}
+D.train.forEach(t=>{if(!t.id)t.id=uid()});
+const save=()=>localStorage.setItem(K,JSON.stringify(D));
+const iso=d=>new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const today=()=>iso(new Date());
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const val=id=>$('#'+id).value.trim(),WD=['So','Mo','Di','Mi','Do','Fr','Sa'];
+const dd=(a,b)=>Math.round((new Date(a+'T12:00')-new Date(b+'T12:00'))/864e5);
+const P={home:['Operation Center','🛰️'],heute:['Tagesplan','🌅'],monat:['Monat','🗓️'],termine:['Termine & iCal','➕'],stundenplan:['Stundenplan','🏫'],aufgaben:['Aufgaben','📚'],think:['Think-Space','🌌'],wellness:['Wellness','🧘'],einkauf:['Einkauf','🛒'],training:['Trainingsplan','🏀'],kraft:['Kraft','💪'],wishes:['Wünsche','✨'],routinen:['Routinen','🔁'],putzplan:['Putzplan (Test)','🧹'],bericht:['Wochenbericht','📈'],beschwerden:['Beschwerden','🩹'],wurflog:['Wurf- & Trainingslog','🎯'],check:['Passt das noch rein?','⚖️'],event:['Liste zum Termin','🎒']};
+let cur='home',mon=new Date(),sel=today(),V={},SC=null,skyCur='',curEv=null;
+/* ================= HIMMEL ================= */
+const rgb=h=>{h=h.replace('#','');return[0,2,4].map(i=>(parseInt(h.substr(i,2),16)/255).toFixed(3))};
+function rnd(s){return()=>(s=(s*16807)%2147483647)/2147483647}
+const SKY={
+home:{g:['#2f7fd8','#6bb8f5','#bfe3fb','#e8f5ff'],c:['#ffffff','#dcecff',.95,.007,-1.15],glow:[[320,90,200,'#fffbe0',.85]]},
+heute:{g:['#f2d3c5','#f6b88f','#f19a79','#e8826f'],c:['#fff1e6','#ffc7a6',.9,.008,-1.1],glow:[[200,650,330,'#ffd27a',.9],[200,650,110,'#fff4c4',.95]]},
+monat:{g:['#4aa9e8','#7cc8f0','#c5ebf5'],c:['#ffffff','#e6f4ff',.85,.006,-1.25],glow:[[90,80,210,'#ffffff',.7]]},
+termine:{g:['#2d1b5e','#6a3a8f','#c25a8a','#f29b7a'],c:['#f7a1b5','#5b3a7a',.6,.008,-1.1],glow:[[200,790,380,'#ffb070',.65]],stars:40,sy:300},
+think:{g:['#050a22','#0e1a45','#1b2a63'],c:['#9fb0e8','#6d7fc0',.2,.007,-1.3],stars:230,moon:1},
+wellness:{g:['#9bd0f5','#d0c3f5','#f7cfe3','#ffe6d4'],c:['#ffffff','#ffe3ef',.85,.007,-1.12],glow:[[200,700,320,'#ffe9c4',.7]]},
+einkauf:{g:['#9fd6f2','#d5ecc6','#fff2b3'],c:['#ffffff','#f5fff0',.8,.007,-1.2],glow:[[300,120,210,'#fffbd0',.9]]},
+training:{g:['#10141c','#2a2f3c','#4b3a47','#a8501f'],c:['#2c3340','#6b6070',.95,.009,-.95],glow:[[200,790,330,'#ff8a3d',.75]]},
+wishes:{g:['#0a0524','#2b1060','#5a2aa0'],c:['#8a6bd0','#5a3aa0',.16,.007,-1.3],stars:270,milky:1},
+routinen:{g:['#7fb7e6','#f6d28f','#f7a95a','#f08a4b'],c:['#fff0c8','#ffd08a',.85,.008,-1.12],glow:[[70,620,330,'#ffd27a',.95]]},
+bericht:{g:['#02030f','#0a1033','#161e5a'],c:['#7080c0','#4a5aa0',.12,.007,-1.3],stars:320,milky:1},
+check:{g:['#04141f','#08323a','#0f5a52'],stars:190,aurora:1},
+stundenplan:{g:['#8ec5f0','#cfe8f7','#fff3c9'],c:['#ffffff','#e6f2ff',.8,.007,-1.2],glow:[[60,100,200,'#fffbe0',.8]]},
+beschwerden:{g:['#c9e8ef','#e3f2ee','#fdf3e1'],c:['#ffffff','#eef8f5',.7,.006,-1.2]},
+kraft:{g:['#0f1722','#26364d','#5b6b82','#c97d33'],c:['#3a4658','#7a8798',.45,.008,-1.15],glow:[[200,790,320,'#ff9a4a',.6]],stars:30,sy:220},
+wurflog:{g:['#1b1330','#5a2a55','#c4552e','#f2923d'],c:['#3a2a4a','#8a4a5a',.5,.008,-1.15],glow:[[200,780,330,'#ffb060',.7]],stars:50,sy:250},
+aufgaben:{g:['#a9c7e6','#d5e2ef','#eef3f7'],c:['#ffffff','#cfd9e4',.85,.007,-1.02]},
+putzplan:{g:['#b6e6e0','#dff5ea','#fff9e0'],c:['#ffffff','#f2fbf6',.7,.006,-1.2],glow:[[320,110,190,'#fffbe0',.85]]}};
+const DARK=['think','wishes','bericht','check','termine','training','event','wurflog','kraft'];
+function skySvg(n){const t=SKY[n],R=rnd(11+n.length*7);let d='<defs>';
+d+=`<linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${t.g.map((c,i)=>`<stop offset="${i/(t.g.length-1)}" stop-color="${c}"/>`).join('')}</linearGradient>`;
+d+=`<linearGradient id="mk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity=".4"/></linearGradient><mask id="m"><rect width="400" height="800" fill="url(#mk)"/></mask>`;
+(t.glow||[]).forEach((q,i)=>{d+=`<radialGradient id="gl${i}"><stop offset="0" stop-color="${q[3]}" stop-opacity="${q[4]}"/><stop offset="1" stop-color="${q[3]}" stop-opacity="0"/></radialGradient>`});
+if(t.c){[[1,t.c[0],t.c[3],1.4],[2,t.c[1],t.c[3]*1.9,1.2]].forEach(([k,col,f,b])=>{const[r,g,bl]=rgb(col);d+=`<filter id="f${k}" x="0" y="0" width="100%" height="100%"><feTurbulence type="fractalNoise" baseFrequency="${f} ${f*2.3}" numOctaves="5" seed="${k*5+n.length}"/><feColorMatrix type="matrix" values="0 0 0 0 ${r} 0 0 0 0 ${g} 0 0 0 0 ${bl} 0 0 0 3 ${t.c[4]*(k==2?.97:1)}"/></filter>`})}
+d+=`<filter id="bl"><feGaussianBlur stdDeviation="14"/></filter><filter id="bl2"><feGaussianBlur stdDeviation="3"/></filter>`;
+d+=`<radialGradient id="mn"><stop offset="0" stop-color="#fff"/><stop offset=".55" stop-color="#e8ecff"/><stop offset="1" stop-color="#cfd6f5"/></radialGradient><radialGradient id="mg"><stop offset="0" stop-color="#cfd9ff" stop-opacity=".5"/><stop offset="1" stop-color="#cfd9ff" stop-opacity="0"/></radialGradient>`;
+d+=`<linearGradient id="au" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6dffb0" stop-opacity="0"/><stop offset=".5" stop-color="#4dffb8" stop-opacity=".75"/><stop offset="1" stop-color="#7a6dff" stop-opacity="0"/></linearGradient></defs>`;
+d+=`<rect width="400" height="800" fill="url(#g)"/>`;
+(t.glow||[]).forEach((q,i)=>{d+=`<circle cx="${q[0]}" cy="${q[1]}" r="${q[2]}" fill="url(#gl${i})"/>`});
+if(t.milky){d+=`<g transform="rotate(-28 200 380)"><ellipse cx="200" cy="380" rx="330" ry="55" fill="#b9a8ff" opacity=".22" filter="url(#bl)"/><ellipse cx="200" cy="380" rx="260" ry="22" fill="#fff" opacity=".12" filter="url(#bl)"/>`;for(let i=0;i<150;i++){const x=R()*500-50,y=380+(R()+R()+R()-1.5)*55;d+=`<circle cx="${x}" cy="${y}" r="${.3+R()*.7}" fill="#fff" opacity="${.3+R()*.5}"/>`}d+='</g>'}
+for(let i=0;i<(t.stars||0);i++){const r=.3+R()*R()*1.5;d+=`<circle cx="${R()*400}" cy="${R()*(t.sy||650)}" r="${r.toFixed(2)}" fill="${R()<.2?'#ffe9c4':R()<.2?'#cfe0ff':'#fff'}" opacity="${(.35+R()*.65).toFixed(2)}"/>`}
+if(t.moon){d+=`<circle cx="300" cy="120" r="90" fill="url(#mg)"/><circle cx="300" cy="120" r="26" fill="url(#mn)"/><circle cx="292" cy="112" r="5" fill="#b9c0e0" opacity=".5"/><circle cx="310" cy="128" r="7" fill="#b9c0e0" opacity=".4"/><circle cx="305" cy="108" r="3" fill="#b9c0e0" opacity=".5"/>`}
+if(t.aurora){d+=`<g filter="url(#bl)"><path d="M-20 260 C100 160 220 360 420 220 L420 420 C240 520 100 330 -20 440Z" fill="url(#au)"/><path d="M-20 400 C120 320 240 470 420 360 L420 520 C240 600 120 440 -20 540Z" fill="url(#au)" opacity=".6"/></g>`}
+if(t.c){d+=`<g mask="url(#m)"><rect width="400" height="800" filter="url(#f2)" opacity="${t.c[2]*.7}"/><rect width="400" height="800" filter="url(#f1)" opacity="${t.c[2]}"/></g>`}
+d+=`<rect width="400" height="800" fill="#000" opacity=".04"/>`;
+return `<svg viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">${d}</svg>`}
+/* ================= TERMINE (einzeln + Serien) ================= */
+const inFree=s=>D.free.some(f=>s>=f.from&&s<=f.to);
+function evOn(s){const w=new Date(s+'T12:00').getDay();
+const rec=D.recur.filter(r=>r.days.includes(w)&&s>=r.from&&(!r.until||s<=r.until)&&!(r.type=='schule'&&inFree(s))&&!D.skip.includes(r.id+'|'+s)).map(r=>({id:r.id+'@'+s,rid:r.id,date:s,time:r.time,dur:r.dur,type:r.type,title:r.title,rec:true,list:[]}));
+return [...D.events.filter(e=>e.date==s),...rec]}
+/* ================= TRAINING & RPE ================= */
+function trainingsOn(s){const w=new Date(s+'T12:00').getDay();
+return [...evOn(s).filter(e=>e.type=='training'||e.type=='spiel').map(e=>({key:s+'|'+e.id,title:e.title,dur:e.dur,time:e.time,date:s})),
+...D.train.filter(t=>t.wd==w).map(t=>({key:s+'|'+t.id,title:t.title,dur:t.dur,time:'',date:s}))]}
+function est(t){const v=Object.values(D.rpe).filter(r=>r.v>0&&r.t.toLowerCase()==t.toLowerCase()).slice(-5).map(r=>r.v);return v.length?v.reduce((a,b)=>a+b)/v.length:6}
+function rp(x){const r=D.rpe[x.key];return r?r.v:est(x.title)}
+function rtag(x){const r=D.rpe[x.key];if(r)return r.v?`RPE ${r.v}`:'ausgefallen';return x.date<=today()?(dd(today(),x.date)<=3?'RPE offen':'nicht bewertet'):`Schätzung ≈ ${est(x.title).toFixed(1)}`}
+function rate(key,n){const x=trainingsOn(key.split('|')[0]).find(y=>y.key==key);D.rpe[key]={v:n,t:x?x.title:''};save();render()}
+function pend(){const out=[],n=new Date(),t=today();for(let i=0;i<=3;i++){const d=new Date();d.setDate(d.getDate()-i);const s=iso(d);
+trainingsOn(s).forEach(x=>{if(D.rpe[x.key])return;let ok=s<t;if(s==t){if(x.time){const[h,mi]=x.time.split(':');ok=n>=new Date(n.getFullYear(),n.getMonth(),n.getDate(),+h,+mi+x.dur)}else ok=n.getHours()>=20}if(ok)out.push(x)})}return out}
+function pendHtml(){const p=pend();if(!p.length)return'';return `<h2><span class=hd>💬 Wie anstrengend war's?</span></h2>`+p.slice(0,3).map(x=>`<div class=card><b>${esc(x.title)}</b> <small>${x.date.slice(5)}</small><div class=rpe>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button onclick="rate('${x.key}',${n})">${n}</button>`).join('')}</div><small>1 = sehr locker · 10 = absolutes Maximum</small><br><button style="margin-top:8px" onclick="rate('${x.key}',0)">Ist ausgefallen</button></div>`).join('')}
+/* ================= BERECHNUNG (evidenzbasiert, siehe Infotexte) ================= */
+const phys0=s=>trainingsOn(s).reduce((a,x)=>a+x.dur*rp(x),0)+D.klogs.filter(x=>x.date==s&&x.inc).reduce((a,x)=>a+x.min*x.rpe,0);            // Session-RPE (Foster 2001), in AU
+function mkSeries(extra={}){const days=[];for(let i=-42;i<=21;i++){const d=new Date();d.setDate(d.getDate()+i);days.push(iso(d))}
+const pa=D.train.reduce((a,t)=>a+t.dur*est(t.title),0)/7,f0=phys0(days[0])+(extra[days[0]]||0);let atl=pa||f0,ctl=pa||f0;const o={};
+days.forEach(s=>{const au=phys0(s)+(extra[s]||0);atl+=(au-atl)*2/8;ctl+=(au-ctl)*2/29;o[s]={au,atl,ctl,acwr:ctl>=40?atl/ctl:null}});return o}   // EWMA-ACWR (Williams 2017)
+const ser=()=>SC||(SC=mkSeries());
+function taskMin(s){const T=today();let m=0;D.tasks.filter(t=>!t.done&&t.date).forEach(t=>{if(t.date<T){if(s==T)m+=t.min;return}const st=new Date(t.date+'T12:00');st.setDate(st.getDate()-9);const a=iso(st)<T?T:iso(st);if(s<a||s>t.date)return;m+=t.min/(dd(t.date,a)+1)});return m}
+const MW={training:0,schule:1,klausur:1.5,spiel:.5,sonstiges:.3};
+const ment=s=>evOn(s).reduce((a,e)=>a+e.dur*(MW[e.type]??.3),0)+taskMin(s);
+const IT=['sl','en','st','mu','mo'];
+function comp(s){const c=D.checks[s];if(!c)return null;const v=IT.map(k=>c[k]).filter(Boolean);return v.length?(v.reduce((a,b)=>a+b)/v.length-1)*25:null}
+function base(s){const v=[];for(let i=1;i<=28;i++){const d=new Date(s+'T12:00');d.setDate(d.getDate()-i);const c=comp(iso(d));if(c!=null)v.push(c)}if(v.length<7)return null;const m=v.reduce((a,b)=>a+b)/v.length;return{m,sd:Math.max(8,Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/v.length)),n:v.length}}
+function zs(s){const c=comp(s),b=base(s);return c==null||!b?null:(c-b.m)/b.sd}
+function mult(s){const c=comp(s);let m=1;if(c!=null){const z=zs(s);m=z!=null?1+.08*Math.max(-2,Math.min(2,z)):.85+.3*c/100}const h=(D.checks[s]||{}).h;if(h){if(h<7)m*=.9;else if(h<8)m*=.95}if(s==today())m*=injF();return Math.max(.6,Math.min(1.2,m))}
+function curSev(i){const k=Object.keys(i.log||{}).sort();return k.length?i.log[k[k.length-1]]:0}
+function injF(){const m=Math.max(0,...D.inj.filter(i=>!i.done).map(curSev));return m>=7?.8:m>=4?.9:m>=1?.97:1}
+function rbase(s){const v=[];for(let i=1;i<=28;i++){const d=new Date(s+'T12:00');d.setDate(d.getDate()-i);const h=(D.checks[iso(d)]||{}).rhr;if(h)v.push(h)}if(v.length<7)return null;const m=v.reduce((a,b)=>a+b)/v.length;return{m,sd:Math.max(2,Math.sqrt(v.reduce((a,b)=>a+(b-m)**2,0)/v.length))}}
+function hints(s){const o=[],T=today(),n=new Date(s+'T12:00'),q=new Date(n);n.setDate(n.getDate()+1);q.setDate(q.getDate()-1);
+const nx=evOn(iso(n)),pv=evOn(iso(q)),cu=evOn(s),has=(l,t)=>l.some(e=>e.type==t);
+if(has(nx,'spiel')){o.push('🏆 Morgen ist Spiel: heute eher locker, früh schlafen, ausreichend essen und trinken (kurze Entlastung vor Wettkämpfen gilt als gut belegt).');if(phys0(s)>600)o.push(`⚠️ Heute sind noch ${Math.round(phys0(s))} AU geplant – vor einem Spiel besser kürzen.`)}
+if(has(nx,'klausur'))o.push('✍️ Morgen ist Klausur: Schlaf hat Vorrang, abends nichts Hartes mehr, eher wiederholen als Neues lernen.');
+if(has(cu,'spiel'))o.push('🏆 Heute Spiel: danach RPE eintragen, morgen eher Erholung einplanen.');
+if((has(cu,'klausur')&&(has(cu,'spiel')||has(nx,'spiel')))||(has(cu,'spiel')&&has(nx,'klausur')))o.push('⚠️ Klausur und Spiel dicht beieinander: Doppelbelastung – Lernstoff früher abschließen.');
+if(has(pv,'spiel')&&phys0(s)>500)o.push('↩️ Gestern war Spiel: heute lieber leichter trainieren.');
+if(s==T){const c=D.checks[T]||{},b=rbase(T);if(c.rhr&&b){const d=c.rhr-b.m;if(d>=7)o.push(`❤️ Ruhepuls ${c.rhr} (Schnitt ${Math.round(b.m)}): deutlich erhöht – Erholung, Schlaf und mögliche Erkältung beachten, Training eher leicht.`);else if(d>=4)o.push(`❤️ Ruhepuls leicht erhöht (+${Math.round(d)} bpm) – achte heute auf Erholung.`)}
+D.inj.filter(i=>!i.done).forEach(i=>{const v=curSev(i);if(v>=7)o.push(`🔴 ${i.area}: starke Beschwerden – bitte ärztlich abklären lassen.`);else if(v>=4)o.push(`🟡 ${i.area}: Belastung anpassen und Trainer/Physio informieren.`)})}
+return o}
+function pst(s,ex){const r=(ex?mkSeries(ex):ser())[s];if(!r)return 0;if(r.acwr!=null){const lim=1.3*Math.min(1,Math.max(.85,mult(s)));return r.acwr<=lim?0:r.acwr<=lim+.2?1:2}return r.au<500?0:r.au<800?1:2}
+function mst(s,x=0){const r=(ment(s)+x)/(600*mult(s));return r<.8?0:r<=1?1:2}
+const lvl=s=>Math.max(pst(s),mst(s));
+const AMP=[['#1e7f50','Grün – noch Platz'],['#9a6700','Gelb – voll, aber machbar'],['#c0392b','Rot – nichts mehr drauf']],DOT=['🟢','🟡','🔴'];
+const amp=l=>AMP[l];
+function acTxt(a){return a==null?'noch zu wenig Verlaufsdaten':a<.8?'niedriger als gewohnt':a<=1.3?'im Zielbereich':a<=1.5?'erhöht':'sehr hoch'}
+/* ================= INFO-TEXTE ================= */
+const INFO={
+home:'<p>Die Ampel fasst <b>Körper</b> und <b>Kopf</b> für heute zusammen; die schlechtere Farbe zählt. Körper: Trainingslast im Vergleich zu deinen letzten 4 Wochen. Kopf: Zeit für Schule, Aufgaben und Termine im Vergleich zu ca. 10 Stunden Tageskapazität, angepasst an dein Befinden. Die genauen Methoden stehen im Tagesplan.</p><p>Die Werte sind Orientierungshilfen für dich, keine medizinische Beratung.</p>',
+heute:'<p><b>Körper:</b> Pro Training zählt Minuten × RPE („Session-RPE“, Foster 2001; gut belegt für Mannschaftssport). Daraus werden zwei gleitende Durchschnitte gebildet: akut (ca. 7 Tage) und chronisch (ca. 28 Tage). Ihr Verhältnis heißt ACWR (Gabbett 2016, EWMA-Variante nach Williams 2017). Zielbereich 0,8–1,3, ab etwa 1,5 steigt in Studien das Verletzungsrisiko. Achtung: Die Schwellen sind Faustwerte und in der Forschung umstritten – ein Trainer-Urteil ersetzen sie nicht. Mit weniger als etwa 2 Wochen Daten rechnet die App vorsichtig mit deinem Trainingsplan als Ausgangsbasis.</p><p><b>Kopf:</b> Schule zählt 1,0 pro Minute, Sonstiges 0,3, dazu die verteilte Lernzeit offener Aufgaben. Kapazität ≈ 600 Min (10 h) × dein Befinden. Das ist meine Faustregel, nicht wissenschaftlich geeicht.</p><p><b>Befinden:</b> Fünf Fragen nach dem Hooper-Index (Hooper &amp; Mackinnon 1995) plus Schlafstunden. Ab 7 Check-ins vergleicht die App dich mit deinem eigenen 28-Tage-Schnitt (z-Wert) – subjektive Werte reagieren bei Athleten meist früher als Messwerte (Saw 2016). Unter 8 h Schlaf sinkt die Kapazität leicht (Jugendliche: 8–10 h empfohlen; Milewski 2014: weniger Schlaf, mehr Verletzungen).</p><p><b>Ruhepuls:</b> morgens im Liegen nach dem Aufwachen messen. Ab 7 Werten vergleicht die App mit deinem Schnitt; ein deutlicher Anstieg (grob 5–7 bpm) kann auf Müdigkeit oder Infekt hindeuten. Die Studienlage ist gemischter als bei den Fragebögen, deshalb gibt es nur einen Hinweis und keinen Einfluss auf die Ampel. <b>Beschwerden:</b> aktive Beschwerden senken deine Kapazität heute leicht.</p>',
+monat:'<p>Die Tagesfarbe ist die Gesamt-Ampel (Körper und Kopf). Für künftige Tage zählen Trainingsplan, Termine und die verteilte Lernzeit offener Aufgaben. 📌 = Deadline, 🏀 = Training. Ohne Check-in wird „normales“ Befinden angenommen. Tippe einen Tag an, um Details zu sehen.</p>',
+termine:'<p>Schule/Lernen zählt zur Kopf-Last (1,0 pro Min), Sonstiges mit 0,3, Training zur Körper-Last. Ein Spiel zählt wie ein Training (Körper) und zusätzlich mit 0,5 pro Minute zur Kopf-Last (Wettkampfdruck, meine Faustregel). Eine Klausur zählt 1,5 pro Minute zur Kopf-Last (Prüfungsstress, Faustregel). Am Tag davor bekommst du Hinweise. Wiederkehrende Termine legst du im Stundenplan an. Die Anstrengung (RPE) fragt dich die App erst danach. Mit 🎒 legst du eine Pack- oder Einkaufsliste zum Termin an. Beim iCal-Import wird der Typ anhand des Titels geraten.</p>',
+aufgaben:'<p>Offene Aufgaben verteilen ihren Aufwand automatisch auf bis zu 10 Tage vor der Deadline (überfällige zählen komplett heute). Das erhöht die Kopf-Last an diesen Tagen und erscheint im Monat. Verteiltes Lernen ist belegt wirksamer als Lernen auf den letzten Drücker (Cepeda et al. 2006).</p>',
+think:'<p>Keine Berechnung. Gedanken aufzuschreiben kann das Grübeln entlasten (Studien zum „expressiven Schreiben“, Effekte klein bis mittel). Die Einträge fließen in keine Zahl ein.</p>',
+wellness:'<p>Wellness-Einträge beeinflussen die Ampel bewusst nicht, damit sie sich nicht schönrechnet. Sie erscheinen im Wochenbericht, damit du siehst, wie oft du aktiv Erholung eingebaut hast. Schlaf, ruhiges Atmen und leichte Bewegung gelten als hilfreiche Erholungsstrategien.</p>',
+einkauf:'<p>Keine Berechnung. Hier erscheinen auch Einkaufspunkte, die du bei Terminen (🎒) eingetragen hast, mit Datum.</p>',
+training:'<p>Plan-Trainings zählen jede Woche automatisch mit Minuten × Ø-RPE (aus deinen letzten 5 Bewertungen gleichnamiger Trainings, sonst 6). So kennt die Ampel auch kommende Wochen. Die Ø-RPE-Anzeige wird mit jeder Bewertung genauer. Bewerten kannst du ein Training am selben Tag und bis zu 3 Tage danach; ältere bleiben unbewertet und zählen mit der Schätzung.</p>',
+wishes:'<p>Keine Berechnung. Mit „Passt das noch rein?“ prüfst du, ob und wann etwas Neues in die Woche passt.</p>',
+routinen:'<p>Serie = Tage in Folge. Die Erfüllungsquote erscheint im Wochenbericht. Routinen beeinflussen die Ampel nicht.</p>',
+putzplan:'<p><b>Testversion</b>, bewusst getrennt von den Berechnungen. Fällig = zuletzt erledigt + Intervall. Nie erledigte Aufgaben sind heute fällig. Wenn sich das bewährt, kann die Putzzeit später in die Kopf-Last einfließen.</p>',
+bericht:'<p><b>Wochenlast</b> = Summe aus Minuten × RPE. Faustregel: nicht mehr als etwa 10–15 % Steigerung pro Woche. <b>Monotonie</b> (Foster 1998) = mittlere Tageslast ÷ Standardabweichung; über 2,0 gilt als einseitig (zu wenig Wechsel zwischen hart und leicht). <b>Strain</b> = Wochenlast × Monotonie. <b>ACWR</b> wie im Tagesplan. <b>Befinden</b> wird mit deinem eigenen Schnitt verglichen. Alles sind Orientierungswerte. Ruhepuls, Würfe und Beschwerden werden zusätzlich angezeigt.</p>',
+check:'<p>Du wählst Art, Dauer und Härte. Für jeden der nächsten 7 Tage rechnet die App durch, wie sich dein ACWR (Körper) und deine Kopf-Auslastung dadurch verändern würden. Gesamt zählt die schlechtere Farbe. Grün ≙ ACWR bis ca. 1,3 bzw. Kopf unter 80 %; gelb ≙ knapp darüber; rot ≙ deutlich darüber. Bei schlechtem Befinden sind die Grenzen strenger.</p>',
+kraft:'<p><b>Aufbau:</b> Du legst Pläne mit Übungen, Sätzen und Wiederholungen an (oder übernimmst eine Vorlage). Beim Training trägst du Gewicht, Wiederholungen und RIR ein und hakst jeden Satz ab. RIR heißt „Wiederholungen in Reserve“: wie viele du noch geschafft hättest. 2–3 gilt für die meisten Sätze als gute Zone.</p><p><b>Vorschlag fürs nächste Mal:</b> Waren alle Sätze auf Ziel und noch mindestens 2 Wiederholungen in Reserve, schlägt die App +2,5 kg vor (Faustregel der Doppelprogression, keine feste Wissenschaft).</p><p><b>Geschätztes Maximum (e1RM):</b> Epley-Formel Gewicht × (1 + Wdh. ÷ 30), Reserve-Wiederholungen eingerechnet. Ab etwa 10 Wiederholungen wird sie ungenau; aussagekräftig ist vor allem der Verlauf über Wochen.</p><p><b>Belastung:</b> Beim Speichern gibst du Dauer und RPE an. Minuten × RPE fließen wie ein Training in deine Körper-Last (Session-RPE funktioniert auch für Krafttraining). Hast du Kraft schon im Trainingsplan eingetragen, wähle „Nein“, sonst zählt es doppelt.</p><p><b>Wichtig:</b> Krafttraining gilt für Jugendliche bei guter Technik und Anleitung als sicher und nützlich (Positionspapiere von NSCA und ACSM). Technik vor Gewicht, Maximalversuche nur mit Trainer, bei Schmerzen abbrechen. Prehab-Übungen können das Verletzungsrisiko senken, ersetzen aber keine Behandlung. Die Vorlagen sind allgemeine Beispiele, kein individueller Plan.</p>',
+stundenplan:'<p><b>Wochenraster:</b> Wähle einen Pinsel (Schule, Training, Radieren). Antippen markiert ein 5-Minuten-Feld. Antippen, kurz halten und ziehen markiert viele Felder hintereinander. Aus zusammenhängenden Feldern entstehen automatisch Termine (Schule 1,0 pro Min Kopf-Last, Training Körper-Last, die RPE fragt die App danach). Pausen zwischen Stunden lässt du frei. „Tag kopieren“ überträgt einen Tag auf Mo–Fr. Änderungen gelten ab dem Datum bei „gilt ab“ (frühere Tage bleiben unverändert).</p><p>Darunter kannst du Serien mit eigenem Namen anlegen. Serien gelten jede Woche an den gewählten Tagen und zählen wie einzelne Termine (Schule 1,0 pro Min Kopf-Last, Training Körper-Last). Für einen einzelnen Tag tippst du „fällt aus“. Ferien und freie Tage blenden Schul-Serien in diesem Zeitraum aus. Wöchentliche Serien aus iCal-Dateien landen automatisch hier.</p>',
+beschwerden:'<p>Das ist ein Beobachtungstool, keine Diagnose. Die Skala 0–10 ist ein übliches Schmerzmaß. Je nach Stärke sinkt deine Tageskapazität leicht (ab 1: ×0,97, ab 4: ×0,9, ab 7: ×0,8 – meine Faustwerte). Beschwerden fortlaufend zu erfassen statt nur Verletzungen ist im Sport etabliert (z. B. OSTRC-Fragebogen). Ärztlich abklären solltest du: starke Schwellung, Instabilität, Taubheit, Schmerz in Ruhe oder nachts, Beschwerden über 1–2 Wochen sowie Kopfschmerz oder Schwindel nach einem Schlag.</p>',
+wurflog:'<p>Quote = Treffer ÷ Versuche der letzten 30 Tage je Wurfart. Der Bereich in Klammern (Wilson-Intervall, 95 %) zeigt die Unsicherheit: Bei wenigen Würfen schwankt die Quote stark, erst ab etwa 50 Versuchen pro Art ist sie halbwegs aussagekräftig. Ein Trend-Pfeil erscheint nur, wenn im Monat davor mindestens 20 Versuche liegen. Vergleiche nur ähnliche Bedingungen (mit Verteidigung ≠ freies Einwerfen).</p>',
+event:'<p>Die Liste gehört zu diesem Termin. Einkaufspunkte erscheinen zusätzlich auf der Einkaufsseite.</p>'};
+const info=n=>INFO[n]?`<details class=card><summary>ℹ️ So funktioniert’s / Berechnung</summary>${INFO[n]}</details>`:'';
+/* ================= NAVIGATION ================= */
+function go(v){cur=v;render();scrollTo(0,0)}
+function render(){SC=null;document.body.className=DARK.includes(cur)?'dark':'';const sk=cur=='event'?'termine':cur=='home'?'home':cur;
+if(skyCur!=sk){skyCur=sk;$('#sky').innerHTML=skySvg(sk);document.body.style.background=SKY[sk].g[0]}
+const back=cur=='event'?'termine':'home';
+$('#app').innerHTML=(cur=='home'?home():`<div class=row style="flex:none"><button style="flex:0 0 auto" onclick="go('${back}')">←</button><h1 class=hd style="flex:1">${P[cur][1]} ${P[cur][0]}</h1></div>`+V[cur]())+info(cur);if(cur=='stundenplan')gInit()}
+function home(){const t=today(),l=lvl(t),a=amp(l);
+return `<h1 class=hd>🛰️ Operation Center</h1><br><small class=hd>${new Date().toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'long'})}</small>
+<div class=amp style="background:${a[0]};margin:12px 0" onclick="go('heute')">Heute: ${a[1]}<br><small>Körper ${DOT[pst(t)]} · Kopf ${DOT[mst(t)]}</small></div>${pendHtml()}
+${new Date().getDay()==0?'<div class=card onclick="go(\'bericht\')">📈 Sonntag – dein Wochenbericht ist bereit</div>':''}
+<div class=grid>${Object.keys(P).filter(k=>k!='home'&&k!='event').map(k=>`<button class=tile onclick="go('${k}')"><span>${P[k][1]}</span>${P[k][0]}</button>`).join('')}</div>`}
+/* ================= TAGESPLAN ================= */
+function chk(k,v){const t=today();D.checks[t]=Object.assign({},D.checks[t]);if(v)D.checks[t][k]=v;else delete D.checks[t][k];save();render()}
+const evOpen=e=>(e.list||[]).filter(x=>!x.done).length;
+const TN={schule:'Schule',training:'Training',spiel:'Spiel',klausur:'Klausur',sonstiges:'Sonstiges'},TI={spiel:'🏆 ',klausur:'✍️ '};
+function evRow(e){const tr=(e.type=='training'||e.type=='spiel')?` · ${rtag({key:e.date+'|'+e.id,title:e.title,date:e.date})}`:'';
+const bt=e.rec?`<button onclick="skipOcc('${e.rid}','${e.date}')">fällt aus</button>`:`<button onclick="openEv('${e.id}')">🎒${evOpen(e)||''}</button> <button onclick="delEv('${e.id}')">✕</button>`;
+return `<div class=item><span>${e.time||'ganztg.'} · ${TI[e.type]||''}${esc(e.title)} <small>${TN[e.type]||e.type}${e.rec?' · Serie':''}${e.dur?' · '+e.dur+' min':''}${tr}</small></span><span>${bt}</span></div>`}
+function skipOcc(r,d){D.skip.push(r+'|'+d);save();render()}
+function delEv(id){D.events=D.events.filter(e=>e.id!=id);save();render()}
+function dayList(s){const w=new Date(s+'T12:00').getDay();const ev=evOn(s).sort((a,b)=>(a.time||'').localeCompare(b.time||'')).map(evRow).join('');
+const pl=D.train.filter(t=>t.wd==w).map(t=>`<div class=item><span>🏀 ${esc(t.title)} <small>Plan · ${t.dur} min · ${rtag({key:s+'|'+t.id,title:t.title,date:s})}</small></span></div>`).join('');
+const tk=D.tasks.filter(t=>!t.done&&t.date==s).map(t=>`<div class=item><span>📌 Deadline: ${esc(t.t)} <small>${esc(t.subj||'')} · ${t.min} min</small></span></div>`).join('');
+const tm=Math.round(taskMin(s)),ts=tm>0?`<div class=item><small>📚 Lernzeit für offene Aufgaben ≈ ${tm} Min</small></div>`:'';
+const kl=D.klogs.filter(x=>x.date==s).map(x=>`<div class=item><span>💪 ${esc(x.name)} <small>${x.min} min · RPE ${x.rpe}</small></span></div>`).join('');return ev+pl+kl+tk+ts||'<small>Nichts geplant.</small>'}
+V.heute=()=>{const t=today(),c=D.checks[t]||{},r=ser()[t],m=mult(t),L=lvl(t),a=amp(L),cp=comp(t),b=base(t),rb=rbase(t);
+const S=(k,l)=>`<label>${l}<select onchange="chk('${k}',+this.value)"><option value="">–</option>${[1,2,3,4,5].map(n=>`<option ${c[k]==n?'selected':''}>${n}</option>`).join('')}</select></label>`;
+const hs=[5.5,6,6.5,7,7.5,8,8.5,9,9.5,10];
+return `<div class=amp style="background:${a[0]}">${a[1]}<br><small>Körper ${DOT[pst(t)]} ACWR ${r.acwr!=null?r.acwr.toFixed(2):'–'} (${acTxt(r.acwr)}) · Heutige Last ${Math.round(r.au)} AU<br>Kopf ${DOT[mst(t)]} ${(ment(t)/60).toFixed(1)} h Aufwand = ${Math.round(ment(t)/(600*m)*100)} % deiner Kapazität</small></div>${pendHtml()}
+<h2><span class=hd>Check-in (1 = schlecht, 5 = sehr gut)</span></h2><div class=card><div class=grid>${S('sl','Schlafqualität')}${S('en','Energie (5 = fit)')}${S('st','Kopf (5 = entspannt)')}${S('mu','Muskeln (5 = frisch)')}${S('mo','Stimmung')}
+<label>Schlaf letzte Nacht<select onchange="chk('h',+this.value)"><option value="">–</option>${hs.map(h=>`<option value=${h} ${c.h==h?'selected':''}>${h==5.5?'unter 6':h} h</option>`).join('')}</select></label>
+<label>Ruhepuls morgens (bpm)${rb?` <small>(Schnitt ${Math.round(rb.m)})</small>`:''}<input type=number inputmode=numeric min=30 max=140 value="${c.rhr||''}" onchange="chk('rhr',+this.value)"></label></div>
+<small>${cp!=null?`Befinden heute: ${Math.round(cp)}/100${b?` · dein 28-Tage-Schnitt: ${Math.round(b.m)} (Kapazität ×${m.toFixed(2)})`:` · noch ${7-Math.min(7,Object.keys(D.checks).length)} Check-ins bis zum persönlichen Vergleich`}`:'Noch kein Check-in heute – die App rechnet mit „normal“.'}</small></div>
+${hints(t).length?`<div class=card><b>💡 Hinweise</b>${hints(t).map(h=>`<p>${h}</p>`).join('')}</div>`:''}<h2><span class=hd>Heute</span></h2><div class=card>${dayList(t)}</div>
+<h2><span class=hd>Routinen</span></h2><div class=card>${D.routines.map(r=>`<div class=item><span class="${r.log[t]?'done':''}">${esc(r.t)}</span><button onclick="tog('${r.id}')">${r.log[t]?'✔':'○'}</button></div>`).join('')||'<small>Noch keine Routinen.</small>'}</div>`}
+/* ================= MONAT ================= */
+V.monat=()=>{const y=mon.getFullYear(),m=mon.getMonth(),off=(new Date(y,m,1).getDay()+6)%7,n=new Date(y,m+1,0).getDate();let c='';
+for(let i=0;i<off;i++)c+='<i></i>';
+for(let d=1;d<=n;d++){const s=iso(new Date(y,m,d)),ev=evOn(s),sp=ev.some(e=>e.type=='spiel'),kl=ev.some(e=>e.type=='klausur'),has=trainingsOn(s).length>0,dl=D.tasks.some(t=>!t.done&&t.date==s),busy=phys0(s)>0||ment(s)>0;
+c+=`<b class="${s==sel?'on':''}" onclick="sel='${s}';render()" style="--c:${busy?AMP[lvl(s)][0]+'99':'transparent'}">${d}<br>${has&&!sp?'🏀':''}${sp?'🏆':''}${kl?'✍️':''}${dl?'📌':''}</b>`}
+return `<div class=row><button onclick="mon=new Date(${y},${m-1},1);render()">‹</button><b class=hd style="text-align:center">${mon.toLocaleDateString('de-DE',{month:'long',year:'numeric'})}</b><button onclick="mon=new Date(${y},${m+1},1);render()">›</button></div>
+<div class="cal card" style="margin-top:8px">${['Mo','Di','Mi','Do','Fr','Sa','So'].map(x=>`<small>${x}</small>`).join('')}${c}</div>
+<h2><span class=hd>${new Date(sel+'T12:00').toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'long'})}</span></h2><div class=card>${dayList(sel)}<div class=item><small>Körper ${DOT[pst(sel)]} · Kopf ${DOT[mst(sel)]}</small></div>${hints(sel).map(h=>`<div class=item><small>${h}</small></div>`).join('')}</div>`}
+/* ================= TERMINE + LISTEN ZUM TERMIN ================= */
+V.termine=()=>`<div class=card><input id=ed type=date value="${sel}"><div class=row><input id=et type=time><input id=edu type=number placeholder="Minuten" value=60></div>
+<select id=ety><option value=schule>Schule / Lernen<option value=training>Training<option value=spiel>Spiel<option value=klausur>Klausur<option value=sonstiges>Sonstiges</select><input id=eti placeholder="Titel">
+<small>Wie anstrengend ein Training war, fragt dich die App erst danach.</small><br><button style="margin-top:8px" onclick="addEv()">Termin hinzufügen</button></div>
+<div class=card><b>iCal importieren (.ics)</b><input type=file id=icsf accept=".ics,text/calendar" onchange="impIcs(this)"><small>Einmalige Termine werden importiert, wöchentliche Serien landen im Stundenplan.</small></div>
+<button onclick="go('stundenplan')">🔁 Wiederkehrende Termine → Stundenplan</button><h2><span class=hd>Kommende Termine</span></h2><div class=card>${D.events.filter(e=>e.date>=today()).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time)).slice(0,40).map(e=>`<div class=item><span>${e.date.slice(5)} ${e.time||''} · ${esc(e.title)}</span><span><button onclick="openEv('${e.id}')">🎒${evOpen(e)||''}</button> <button onclick="delEv('${e.id}')">✕</button></span></div>`).join('')||'<small>Keine.</small>'}</div>`;
+function addEv(){const t=val('eti');if(!t)return;D.events.push({id:uid(),date:val('ed')||today(),time:val('et'),dur:+val('edu')||0,type:val('ety'),title:t,list:[]});save();render()}
+function openEv(id){curEv=id;go('event')}
+V.event=()=>{const e=D.events.find(x=>x.id==curEv);if(!e)return'<div class=card>Termin nicht gefunden.</div>';e.list=e.list||[];
+return `<div class=card><b>${esc(e.title)}</b><br><small>${e.date} ${e.time||''} · ${e.type}</small></div>
+<div class=card><input id=li placeholder="z.B. Trikot, Wasserflasche / Milch kaufen"><div class=row><select id=lk><option>Packliste<option>Einkauf</select><button onclick="addEvItem()">＋ Hinzufügen</button></div></div>
+<div class=card>${e.list.map((x,i)=>`<div class=item><span class="${x.done?'done':''}" onclick="togEv('${e.id}',${i})">${x.done?'☑':'☐'} ${esc(x.t)} <small>${x.k}</small></span><button onclick="delEvItem('${e.id}',${i})">✕</button></div>`).join('')||'<small>Noch leer.</small>'}</div>`};
+function addEvItem(){const e=D.events.find(x=>x.id==curEv),t=val('li');if(!e||!t)return;(e.list=e.list||[]).push({t,k:val('lk'),done:false});save();render()}
+function togEv(id,i){const e=D.events.find(x=>x.id==id);e.list[i].done=!e.list[i].done;save();render()}
+function delEvItem(id,i){D.events.find(x=>x.id==id).list.splice(i,1);save();render()}
+function ics(txt){txt=txt.replace(/\r?\n[ \t]/g,'');const out=[],recs=[],M={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6};txt.split('BEGIN:VEVENT').slice(1).forEach(b=>{const g=k=>{const m=b.match(new RegExp('^'+k+'[^:\\n]*:(.*)$','m'));return m?m[1].trim():''};
+const pd=s=>{const m=s.match(/(\d{4})(\d\d)(\d\d)(?:T(\d\d)(\d\d))?(Z)?/);if(!m)return null;return m[6]?new Date(Date.UTC(+m[1],m[2]-1,+m[3],+m[4],+m[5])):new Date(+m[1],m[2]-1,+m[3],+(m[4]||0),+(m[5]||0))};
+const a=g('DTSTART'),s=pd(a),e=pd(g('DTEND'));if(!s)return;const all=!/T\d/.test(a),ti=g('SUMMARY').replace(/\\,/g,',')||'Termin',
+type=/klausur|prüfung|schularbeit/i.test(ti)?'klausur':/spiel|match|turnier/i.test(ti)?'spiel':/training|basket/i.test(ti)?'training':/schule|unterricht|mathe|deutsch|englisch|bio|physik|chemie|geschichte|sport/i.test(ti)?'schule':'sonstiges',
+time=all?'':s.toTimeString().slice(0,5),dur=all?0:(e?Math.max(15,Math.round((e-s)/6e4)):60),rr=g('RRULE');
+if(/FREQ=WEEKLY/.test(rr)&&!/INTERVAL=([2-9])/.test(rr)){const bd=(rr.match(/BYDAY=([A-Z0-9,+-]+)/)||[])[1],days=bd?bd.split(',').map(x=>M[x.slice(-2)]).filter(x=>x!=null):[s.getDay()];let until='';const u=rr.match(/UNTIL=(\d{4})(\d\d)(\d\d)/);if(u)until=u[1]+'-'+u[2]+'-'+u[3];else{const c=rr.match(/COUNT=(\d+)/),e2=new Date(s);e2.setDate(e2.getDate()+(c?Math.ceil(+c[1]/days.length)*7:365));until=iso(e2)}
+recs.push({id:uid(),title:ti,type,time,dur,days,from:iso(s),until});return}
+out.push({id:uid(),date:iso(s),time,dur,type,title:ti,list:[]})});return{out,recs}}
+function impIcs(i){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{let n=0,k=0;const R=ics(r.result);R.out.forEach(e=>{if(!D.events.some(x=>x.date==e.date&&x.time==e.time&&x.title==e.title)){D.events.push(e);n++}});
+R.recs.forEach(c=>{if(!D.recur.some(x=>x.title==c.title&&x.time==c.time&&x.from==c.from&&x.days.join()==c.days.join())){D.recur.push(c);k++}});save();alert(n+' Termine und '+k+' Serien importiert');render()};r.readAsText(f)}
+/* ================= STUNDENPLAN ================= */
+const WN=[1,2,3,4,5,6,0];
+V.stundenplan=()=>{const T=today(),R=D.recur.filter(r=>!r.g).sort((a,b)=>a.time.localeCompare(b.time));
+return gridHtml()+`<h2><span class=hd>Eigene Serien (mit Namen)</span></h2><div class=card><input id=rt placeholder="z.B. Mathe, Team-Training"><select id=rty><option value=schule>Schule / Lernen<option value=training>Training<option value=sonstiges>Sonstiges</select>
+<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0">${WN.map(d=>`<label style="display:flex;align-items:center;gap:4px"><input type=checkbox id=rd${d}> ${WD[d]}</label>`).join('')}</div>
+<div class=row><input id=rtm type=time value="08:00"><input id=rdu type=number value=90 placeholder="Minuten"></div>
+<div class=row><label>ab<input id=rfr type=date value="${T}"></label><label>bis (optional)<input id=rto type=date></label></div>
+<button onclick="addRec()">Serie hinzufügen</button></div>
+<div class=card>${R.map(r=>`<div class=item><span>${esc(r.title)} <small>${r.days.map(d=>WD[d]).join(' ')} · ${r.time} · ${r.dur} min · ${TN[r.type]}<br>ab ${r.from.slice(5)}${r.until?' bis '+r.until.slice(5):''}</small></span><button onclick="D.recur=D.recur.filter(x=>x.id!='${r.id}');save();render()">✕</button></div>`).join('')||'<small>Noch keine Serien.</small>'}</div>
+<h2><span class=hd>Ferien / freie Tage</span></h2><div class=card><div class=row><input id=ffr type=date><input id=fto type=date></div><input id=fti placeholder="z.B. Herbstferien"><button onclick="addFree()">Hinzufügen</button>
+${D.free.map(f=>`<div class=item><span>${esc(f.t||'frei')} <small>${f.from.slice(5)} – ${f.to.slice(5)}</small></span><button onclick="D.free=D.free.filter(x=>x.id!='${f.id}');save();render()">✕</button></div>`).join('')}</div>`};
+function addRec(){const t=val('rt'),days=WN.filter(d=>$('#rd'+d).checked);if(!t||!days.length||!val('rfr'))return alert('Titel, mindestens ein Tag und Startdatum angeben');
+D.recur.push({id:uid(),title:t,type:val('rty'),days,time:val('rtm'),dur:+val('rdu')||60,from:val('rfr'),until:val('rto')});save();render()}
+function addFree(){if(!val('ffr')||!val('fto')||val('fto')<val('ffr'))return alert('Von- und Bis-Datum angeben');D.free.push({id:uid(),from:val('ffr'),to:val('fto'),t:val('fti')});save();render()}
+/* ================= KRAFT ================= */
+const EXL=[['Unterkörper',['Kniebeuge','Frontkniebeuge','Rumänisches Kreuzheben','Kreuzheben','Ausfallschritte','Bulgarian Split Squat','Hip Thrust','Wadenheben','Nordic Curl','Step-Ups']],['Oberkörper',['Bankdrücken','Schrägbankdrücken','Schulterdrücken','Klimmzüge','Rudern','Liegestütze','Dips','Face Pulls']],['Rumpf',['Plank|s','Seitstütz|s','Dead Bug','Pallof Press','Hanging Knee Raises']],['Explosiv',['Box Jumps','Counter-Movement-Jumps','Medizinball-Wurf','Landungstraining','Einbeinige Sprünge']],['Prehab',['Einbein-Balance|s','Copenhagen Plank|s','Single-Leg Glute Bridge','Tibialis-Raises','Hüftabduktion mit Band']]];
+const EX={};EXL.forEach(([c,l])=>l.forEach(x=>{const[n,t]=x.split('|');EX[n]={c,t:t=='s'}}));
+const kc=n=>(EX[n]||{c:'Sonstiges'}).c,ku=n=>EX[n]&&EX[n].t?'Sek.':'Wdh.';
+const TPL=[{name:'Ganzkörper A (Basis)',items:[['Kniebeuge',3,5],['Bankdrücken',3,5],['Rudern',3,8],['Rumänisches Kreuzheben',3,6],['Plank',3,45]]},
+{name:'Unterkörper + Sprung',items:[['Frontkniebeuge',4,5],['Rumänisches Kreuzheben',3,6],['Bulgarian Split Squat',3,8],['Box Jumps',3,4],['Wadenheben',3,12]]},
+{name:'Oberkörper',items:[['Schulterdrücken',3,6],['Klimmzüge',3,6],['Schrägbankdrücken',3,8],['Rudern',3,8],['Face Pulls',2,15]]},
+{name:'Prehab Knie & Sprunggelenk (kurz)',items:[['Einbein-Balance',2,30],['Copenhagen Plank',2,20],['Nordic Curl',2,5],['Single-Leg Glute Bridge',2,10],['Landungstraining',2,5]]},
+{name:'Rumpf (kurz)',items:[['Plank',3,40],['Seitstütz',2,30],['Dead Bug',3,10],['Pallof Press',3,10]]}];
+let KT='train',KP=null,KE='',KTE=0,KTI=null;
+const e1=(w,r,rir)=>{w=+w;r=+r;if(!(w>0&&r>0))return 0;const e=r+(+rir||0);return e<=12?w*(1+e/30):0};
+const exOpts=()=>'<option value="">– Übung wählen –</option>'+EXL.map(([c,l])=>`<optgroup label="${c}">${l.map(x=>`<option>${x.split('|')[0]}</option>`).join('')}</optgroup>`).join('');
+function lastEx(n){const ks=[...D.klogs].sort((a,b)=>a.date.localeCompare(b.date));for(let i=ks.length-1;i>=0;i--){const x=ks[i].ex.find(e=>e.n==n);if(x&&x.sets.length)return{date:ks[i].date,sets:x.sets}}return null}
+function sug(n,tr){const l=lastEx(n);if(!l)return 'Noch keine Daten – wähle ein Gewicht, bei dem du alle Sätze sauber schaffst und 2–3 Wiederholungen in Reserve hast.';
+const ok=tr?l.sets.every(s=>+s.r>=tr):true,rir=l.sets.every(s=>s.rir===''||s.rir==null||+s.rir>=2),w=Math.max(...l.sets.map(s=>+s.w||0)),last=`Zuletzt ${l.sets.length}×${l.sets[0].r}${w?' @ '+w+' kg':''}. `;
+if(ok&&rir)return last+(w>0?'Alles geschafft – heute +2,5 kg probieren.':(ku(n)=='Sek.'?'Heute 5 Sek. länger probieren.':'Heute 1–2 Wdh. mehr probieren.'));
+if(ok)return last+'Ziel erreicht, aber nah am Limit – Gewicht halten.';return last+'Gewicht halten und das Ziel erreichen.'}
+V.kraft=()=>{if(D.kact)return kActive();const T=[['train','▶ Starten'],['plans','📋 Pläne'],['hist','📈 Verlauf']];
+return `<div class=row>${T.map(([k,l])=>`<button onclick="KT='${k}';render()" style="${KT==k?'outline:3px solid var(--fg)':''}">${l}</button>`).join('')}</div>`+(KT=='train'?kTrain():KT=='plans'?kPlans():kHist())};
+function kTrain(){const L=pst(today());
+return (L>=1?`<div class=card>${DOT[L]} Dein Körper ist heute schon ${L==1?'gut':'sehr stark'} ausgelastet – lieber ein leichtes Programm oder Prehab statt Maximalkraft.</div>`:'')+
+`<div class=card>${D.kplans.map(p=>`<div class=item><span>${esc(p.name)} <small>${p.items.length} Übungen</small></span><button onclick="kStart('${p.id}')">▶</button></div>`).join('')||'<small>Noch keine Pläne – im Tab „Pläne“ anlegen oder eine Vorlage übernehmen.</small>'}</div><button onclick="kStart('free')">Freies Training starten</button>`}
+function kPlans(){const sel=D.kplans.find(p=>p.id==KP);
+if(sel)return `<div class=card><input value="${esc(sel.name)}" onchange="kRename('${sel.id}',this.value)"></div>
+<div class=card>${sel.items.map((it,i)=>`<div class=item><span>${esc(it.ex)} <small>${it.sets}×${it.reps} ${ku(it.ex)}</small></span><span><button onclick="kMove(${i})">▲</button> <button onclick="kDelItem(${i})">✕</button></span></div>`).join('')||'<small>Noch leer.</small>'}</div>
+<div class=card><b>Übung hinzufügen</b><select id=kpx>${exOpts()}</select><input id=kpc placeholder="oder eigene Übung"><div class=row><input id=kps type=number value=3 placeholder="Sätze"><input id=kpr type=number value=8 placeholder="Wdh./Sek."></div><button onclick="kAddItem()">＋ Hinzufügen</button></div><button onclick="KP=null;render()">Fertig</button>`;
+return `<div class=card>${D.kplans.map(p=>`<div class=item><span>${esc(p.name)} <small>${p.items.length} Übungen</small></span><span><button onclick="KP='${p.id}';render()">✎</button> <button onclick="D.kplans=D.kplans.filter(x=>x.id!='${p.id}');save();render()">✕</button></span></div>`).join('')||'<small>Noch keine Pläne.</small>'}</div>
+<div class=card><div class=row><input id=kpn placeholder="Neuer Plan (Name)"><button onclick="kNewPlan()">＋</button></div></div>
+<h2><span class=hd>Vorlagen</span></h2><div class=card>${TPL.map((t,i)=>`<div class=item><span>${t.name} <small>${t.items.map(x=>x[0]).join(', ')}</small></span><button onclick="kTpl(${i})">＋</button></div>`).join('')}</div>`}
+function kRename(id,v){const p=D.kplans.find(x=>x.id==id);if(p&&v.trim()){p.name=v.trim();save()}}
+function kAddItem(){const p=D.kplans.find(x=>x.id==KP),n=val('kpc')||$('#kpx').value;if(!p||!n)return;p.items.push({ex:n,sets:+val('kps')||3,reps:+val('kpr')||8});save();render()}
+function kDelItem(i){D.kplans.find(x=>x.id==KP).items.splice(i,1);save();render()}
+function kMove(i){const a=D.kplans.find(x=>x.id==KP).items;if(i>0){[a[i-1],a[i]]=[a[i],a[i-1]];save();render()}}
+function kNewPlan(){const n=val('kpn');if(!n)return;const p={id:uid(),name:n,items:[]};D.kplans.push(p);KP=p.id;save();render()}
+function kTpl(i){const t=TPL[i];D.kplans.push({id:uid(),name:t.name,items:t.items.map(([ex,sets,reps])=>({ex,sets,reps}))});save();render()}
+function kStart(id){const pl=D.kplans.find(p=>p.id==id),ex=pl?pl.items.map(it=>{const l=lastEx(it.ex),w0=l?(l.sets[0].w||''):'';return{n:it.ex,tr:it.reps,sets:Array.from({length:it.sets},()=>({w:w0,r:it.reps,rir:'',d:false}))}}):[];
+D.kact={name:pl?pl.name:'Freies Training',date:today(),t0:Date.now(),ex};save();render()}
+function kActive(){const a=D.kact;
+return `<div class=card><b>${esc(a.name)}</b> <small>läuft seit ${Math.round((Date.now()-a.t0)/60000)} min</small><div class=row style="margin-top:8px"><button onclick="kTimer(60)">⏱ 60</button><button onclick="kTimer(90)">⏱ 90</button><button onclick="kTimer(120)">⏱ 120</button><b id=ktm style="text-align:center"></b></div></div>`+
+a.ex.map((e,ei)=>`<div class=card><div class=item style="border:0"><b>${esc(e.n)}</b><button onclick="kDelEx(${ei})">✕</button></div><small>${e.tr?`Ziel: ${e.sets.length}×${e.tr} ${ku(e.n)}. `:''}${sug(e.n,e.tr||0)}</small>
+${e.sets.map((x,si)=>`<div class=row style="margin-top:6px"><span style="flex:0 0 20px">${si+1}</span><input type=number inputmode=decimal step=0.5 placeholder="kg" value="${x.w}" onchange="kSet(${ei},${si},'w',this.value)"><input type=number inputmode=numeric placeholder="${ku(e.n)}" value="${x.r}" onchange="kSet(${ei},${si},'r',this.value)"><select onchange="kSet(${ei},${si},'rir',this.value)"><option value="">RIR</option>${[0,1,2,3,4].map(n=>`<option ${x.rir!==''&&x.rir!=null&&+x.rir===n?'selected':''}>${n}</option>`).join('')}</select><button onclick="kDone(${ei},${si})" style="flex:0 0 auto;${x.d?'background:#1e7f50;color:#fff':''}">✓</button></div>`).join('')}
+<button style="margin-top:8px" onclick="kAddSet(${ei})">＋ Satz</button></div>`).join('')+
+`<div class=card><b>Übung hinzufügen</b><select id=kaex>${exOpts()}</select><input id=kaxc placeholder="oder eigene Übung"><button onclick="kAddEx()">＋ Hinzufügen</button></div>
+<div class=card><b>Training beenden</b><br><small>Anstrengung am besten gleich jetzt bewerten.</small><div class=row><label>Dauer (Min)<input id=kmin type=number value="${Math.max(10,Math.round((Date.now()-a.t0)/60000))}"></label><label>RPE (1–10)<select id=krpe>${[...Array(10).keys()].map(i=>`<option ${i==5?'selected':''}>${i+1}</option>`).join('')}</select></label></div>
+<label>In Belastung einrechnen<select id=kinc><option value=1>Ja<option value=0>Nein (schon im Trainingsplan)</select></label><div class=row style="margin-top:8px"><button onclick="kFinish()">✔ Speichern</button><button onclick="kCancel()">Verwerfen</button></div></div>`}
+function kSet(ei,si,f,v){D.kact.ex[ei].sets[si][f]=v;save()}
+function kDone(ei,si){const x=D.kact.ex[ei].sets[si];x.d=!x.d;save();render()}
+function kAddSet(ei){const a=D.kact.ex[ei].sets,l=a[a.length-1]||{w:'',r:''};a.push({w:l.w,r:l.r,rir:'',d:false});save();render()}
+function kDelEx(ei){D.kact.ex.splice(ei,1);save();render()}
+function kAddEx(){const n=val('kaxc')||$('#kaex').value;if(!n)return;const l=lastEx(n);D.kact.ex.push({n,tr:0,sets:[{w:l?l.sets[0].w:'',r:'',rir:'',d:false}]});save();render()}
+function kCancel(){if(confirm('Training wirklich verwerfen?')){D.kact=null;save();render()}}
+function kFinish(){const a=D.kact,ex=a.ex.map(e=>({n:e.n,sets:e.sets.filter(x=>x.d&&+x.r>0).map(x=>({w:+x.w||0,r:+x.r,rir:x.rir===''||x.rir==null?'':+x.rir}))})).filter(e=>e.sets.length);
+if(!ex.length)return alert('Hake mindestens einen Satz mit ✓ ab');
+D.klogs.push({id:uid(),date:a.date,name:a.name,min:+val('kmin')||0,rpe:+val('krpe')||6,inc:val('kinc')!='0',ex});D.kact=null;save();render()}
+function kTimer(sec){KTE=Date.now()+sec*1000;clearInterval(KTI);KTI=setInterval(()=>{const l=Math.round((KTE-Date.now())/1000),e=document.getElementById('ktm');if(l<=0){clearInterval(KTI);if(e)e.textContent='Los! 💪';if(navigator.vibrate)navigator.vibrate([200,100,200]);return}if(e)e.textContent=Math.floor(l/60)+':'+String(l%60).padStart(2,'0')},500)}
+function kHist(){const ks=[...D.klogs].sort((a,b)=>a.date.localeCompare(b.date)),T=today();
+const cat=(a,b)=>{const o={};ks.filter(l=>l.date>=a&&l.date<=b).forEach(l=>l.ex.forEach(e=>{o[kc(e.n)]=(o[kc(e.n)]||0)+e.sets.length}));return o},c1=cat(ago(6),T),c0=cat(ago(13),ago(7)),cs=[...new Set([...Object.keys(c1),...Object.keys(c0)])];
+const names=[...new Set(ks.flatMap(l=>l.ex.map(e=>e.n)))];if(!KE||!names.includes(KE))KE=names[0]||'';
+const rows=ks.filter(l=>l.ex.some(e=>e.n==KE)).slice(-8).map(l=>{const e=l.ex.find(x=>x.n==KE);return{d:l.date,e:Math.max(0,...e.sets.map(x=>e1(x.w,x.r,x.rir))),top:e.sets.reduce((a,x)=>x.w>=a.w?x:a,e.sets[0])}}),mx=Math.max(1,...rows.map(r=>r.e));
+return `<div class=card><b>Harte Sätze pro Bereich</b>${cs.map(c=>`<div class=item><span>${c}</span><span>${c1[c]||0} <small>(Vorwoche ${c0[c]||0})</small></span></div>`).join('')||'<p><small>Noch keine Einheiten.</small></p>'}<small>Letzte 7 Tage, nur abgehakte Sätze.</small></div>
+<div class=card><b>Fortschritt</b><select onchange="KE=this.value;render()">${names.map(n=>`<option ${n==KE?'selected':''}>${n}</option>`).join('')}</select>
+${rows.map(r=>`<div style="margin:8px 0"><small>${r.d.slice(5)} · ${r.top.w?r.top.w+' kg × ':''}${r.top.r} ${ku(KE)} · ${r.e?'e1RM ≈ '+Math.round(r.e)+' kg':'–'}</small><div class=bar style="width:${r.e/mx*100}%;background:#ffb060"></div></div>`).join('')||'<p><small>Noch keine Daten.</small></p>'}${rows.length&&mx>1?`<small>Bestwert (e1RM): ${Math.round(mx)} kg</small>`:''}</div>
+<div class=card><b>Letzte Einheiten</b>${[...ks].reverse().slice(0,8).map(l=>`<div class=item><span>${l.date.slice(5)} · ${esc(l.name)} <small>${l.ex.reduce((a,e)=>a+e.sets.length,0)} Sätze · ${Math.round(l.ex.reduce((a,e)=>a+e.sets.reduce((b,x)=>b+x.w*x.r,0),0))} kg bewegt · ${l.min} min · RPE ${l.rpe}${l.inc?'':' · nicht in Belastung'}</small></span><button onclick="D.klogs=D.klogs.filter(x=>x.id!='${l.id}');save();render()">✕</button></div>`).join('')||'<small>Noch keine Einheiten.</small>'}</div>`}
+/* ================= WOCHENRASTER ================= */
+const COLS=[1,2,3,4,5,6,0];let GB='s',GR=null,gst=null,gLast=null,gMode=0;
+const hm=i=>String(Math.floor(i/12)).padStart(2,'0')+':'+String(i%12*5).padStart(2,'0');
+const gRange=()=>D.gridRange||[6,22],gZ=()=>D.gridZ||14;
+function gSum(){let a=0,t=0;COLS.forEach(d=>(D.grid[d]||[]).forEach(v=>{if(v==1)a++;else if(v==2)t++}));return `🏫 Schule ${(a*5/60).toFixed(1)} h/Woche · 🏀 Training ${(t*5/60).toFixed(1)} h/Woche`}
+function rebuildGrid(){if(!D.gridFrom)D.gridFrom=today();D.recur=D.recur.filter(r=>!r.g);
+COLS.forEach(d=>{const a=D.grid[d]||[];let i=0;while(i<288){const t=a[i]||0;if(!t){i++;continue}let j=i;while(j<288&&(a[j]||0)==t)j++;const type=t==1?'schule':'training';
+D.recur.push({id:'g'+d+'_'+i+type[0],g:true,title:type=='schule'?'Schule':'Training',type,days:[d],time:hm(i),dur:(j-i)*5,from:D.gridFrom,until:D.gridUntil||''});i=j}});save()}
+function gridHtml(){const[a,b]=gRange(),z=gZ(),n=(b-a)*12;
+let c='<div class=hd2></div>'+COLS.map(d=>`<div class=hd2>${WD[d]}</div>`).join('');
+for(let r=0;r<n;r++){const i=a*12+r,h=r%12==0;c+=`<div class="tl${h?' h':''}">${h?(a+r/12)+':00':''}</div>`+COLS.map(d=>{const v=(D.grid[d]||[])[i]||0;return `<div class="c${v==1?' s':v==2?' t':''}${h?' h':''}" data-d="${d}" data-r="${r}"></div>`}).join('')}
+const bb=(k,l)=>`<button class=br data-b="${k}" onclick="setBrush('${k}')" style="${GB==k?'outline:3px solid var(--fg)':''}">${l}</button>`,op=(l,v)=>l.map(x=>`<option value=${x} ${x==v?'selected':''}>${x}:00</option>`).join('');
+return `<div class=card><b>Wochenraster (5-Minuten-Felder)</b><div class=row style="margin:8px 0">${bb('s','🏫 Schule')}${bb('t','🏀 Training')}${bb('x','⌫ Radieren')}</div>
+<small>Antippen = ein Feld. Antippen, kurz halten und ziehen = mehrere Felder. Pausen einfach freilassen.</small>
+<div class=row style="margin:8px 0"><label>von<select onchange="D.gridRange=[+this.value,gRange()[1]];save();render()">${op([4,5,6,7,8,9,10,11,12],a)}</select></label><label>bis<select onchange="D.gridRange=[gRange()[0],+this.value];save();render()">${op([14,15,16,17,18,19,20,21,22,23,24],b)}</select></label><button onclick="gZoom(-1)">－</button><button onclick="gZoom(1)">＋</button></div>
+<div class=row style="margin:8px 0"><label>gilt ab<input type=date value="${D.gridFrom||today()}" onchange="D.gridFrom=this.value;rebuildGrid()"></label><label>bis (optional)<input type=date value="${D.gridUntil||''}" onchange="D.gridUntil=this.value;rebuildGrid()"></label></div>
+<div class=row style="margin:8px 0"><label>Tag kopieren<select id=gc>${COLS.map(d=>`<option value=${d}>${WD[d]}</option>`).join('')}</select></label><button onclick="gCopy()">auf Mo–Fr</button><button onclick="gClear()">Tag leeren</button></div>
+<div id=gsum style="margin:6px 0"><b>${gSum()}</b></div><div id="grid" style="--rh:${z}px">${c}</div></div>`}
+function gZoom(k){const Z=[10,14,18,24],i=Z.indexOf(gZ());D.gridZ=Z[Math.max(0,Math.min(3,i+k))];save();render()}
+function setBrush(b){GB=b;document.querySelectorAll('.br').forEach(x=>x.style.outline=x.dataset.b==b?'3px solid var(--fg)':'')}
+function gCopy(){const src=+val('gc');[1,2,3,4,5].forEach(d=>{if(d!=src)D.grid[d]=[...(D.grid[src]||Array(288).fill(0))]});rebuildGrid();render()}
+function gClear(){D.grid[+val('gc')]=Array(288).fill(0);rebuildGrid();render()}
+function gInit(){const g=document.getElementById('grid');if(!g)return;GR=g;
+g.addEventListener('pointerdown',gDown);g.addEventListener('pointermove',gMove);g.addEventListener('pointerup',gUp);g.addEventListener('pointercancel',gCancel);
+g.addEventListener('touchmove',e=>{if(gst&&gst.hold)e.preventDefault()},{passive:false});g.addEventListener('contextmenu',e=>e.preventDefault())}
+const gCell=e=>{const el=document.elementFromPoint(e.clientX,e.clientY);return el&&el.dataset&&el.dataset.r!==undefined&&el.dataset.d!==undefined?el:null};
+function gSet(d,r){const arr=D.grid[d]||(D.grid[d]=Array(288).fill(0));arr[gRange()[0]*12+r]=gMode;const el=GR.children[8+r*8+1+COLS.indexOf(d)];if(el)el.className='c'+(gMode==1?' s':gMode==2?' t':'')+(r%12==0?' h':'')}
+function gStart(c){const d=+c.dataset.d,r=+c.dataset.r,cur=(D.grid[d]||[])[gRange()[0]*12+r]||0,code=GB=='s'?1:GB=='t'?2:0;gMode=GB=='x'?0:(cur==code?0:code);gSet(d,r);gLast={d,r}}
+function gPaint(c){const d=+c.dataset.d,r=+c.dataset.r;if(gLast&&gLast.d==d){for(let k=Math.min(gLast.r,r);k<=Math.max(gLast.r,r);k++)gSet(d,k)}else gSet(d,r);gLast={d,r}}
+function gFinish(){gLast=null;rebuildGrid();const s=document.getElementById('gsum');if(s)s.innerHTML='<b>'+gSum()+'</b>'}
+function gDown(e){const c=gCell(e);if(!c)return;gst={x:e.clientX,y:e.clientY,c,hold:false,moved:false};
+if(e.pointerType=='mouse'){gst.hold=true;gStart(c)}else gst.t=setTimeout(()=>{if(gst){gst.hold=true;gStart(gst.c);if(navigator.vibrate)navigator.vibrate(15)}},300)}
+function gMove(e){if(!gst)return;if(!gst.hold){if(Math.abs(e.clientX-gst.x)>10||Math.abs(e.clientY-gst.y)>10){clearTimeout(gst.t);gst.moved=true}return}const c=gCell(e);if(c)gPaint(c)}
+function gUp(){if(!gst)return;clearTimeout(gst.t);const q=gst;gst=null;if(q.hold)gFinish();else if(!q.moved){gStart(q.c);gFinish()}}
+function gCancel(){if(!gst)return;clearTimeout(gst.t);const h=gst.hold;gst=null;if(h)gFinish()}
+/* ================= BESCHWERDEN ================= */
+const AREAS=['Knie','Sprunggelenk','Fuß / Ferse','Schienbein / Unterschenkel','Oberschenkel','Leiste / Hüfte','Unterer Rücken','Schulter','Hand / Finger','Kopf','Sonstiges'];
+V.beschwerden=()=>{const T=today(),act=D.inj.filter(i=>!i.done),old=D.inj.filter(i=>i.done).slice(-8),o=a=>a.map(x=>`<option>${x}</option>`).join(''),nums=v=>[...Array(11).keys()].map(n=>`<option ${n==v?'selected':''}>${n}</option>`).join('');
+return `<div class=card><b>Neue Beschwerde</b><select id=ia>${o(AREAS)}</select><div class=row><select id=is>${o(['links','rechts','beidseitig','–'])}</select><select id=ik>${o(['Schmerz','Verletzung','Verspannung','Krankheit'])}</select></div>
+<label>Stärke (0 = nichts, 10 = schlimmster vorstellbarer Schmerz)<select id=iv>${nums(3)}</select></label><input id=ino placeholder="Notiz (z.B. nach Landung, beim Laufen)"><button onclick="addInj()">Eintragen</button></div>
+${act.map(i=>{const v=curSev(i),n=D.inj.filter(x=>x.area==i.area&&dd(T,x.start)<=90).length,ks=Object.keys(i.log).sort().slice(-7);
+return `<div class=card><b>${esc(i.area)}${i.side&&i.side!='–'?' '+i.side:''} · ${i.kind}</b> <small>seit ${i.start.slice(5)}</small>${n>=3?' <span class=badge>wiederkehrend</span>':''}<br>aktuell <b>${v}/10</b> <small>${ks.map(k=>k.slice(8)+'.: '+i.log[k]).join(' · ')}</small>${i.note?`<br><small>${esc(i.note)}</small>`:''}
+${v>=7?'<p>🔴 Starke Beschwerden: bitte ärztlich abklären lassen.</p>':v>=4?'<p>🟡 Belastung anpassen, Trainer oder Physio informieren.</p>':''}${n>=3?'<p>↻ Dieselbe Stelle taucht wiederholt auf – ein Physio sollte sich das ansehen.</p>':''}
+<div class=row><select id="sv${i.id}">${nums(v)}</select><button onclick="setSev('${i.id}')">Heute aktualisieren</button></div>
+<div class=row><button onclick="doneInj('${i.id}')">✔ Abgeklungen</button><button onclick="D.inj=D.inj.filter(x=>x.id!='${i.id}');save();render()">✕ Löschen</button></div></div>`}).join('')||'<div class=card><small>Keine aktiven Beschwerden 👍</small></div>'}
+${old.length?`<details class=card><summary>Abgeklungen (${old.length})</summary>${old.map(i=>`<div class=item><span>${esc(i.area)} <small>${i.start.slice(5)} – ${(i.doneDate||'').slice(5)}</small></span></div>`).join('')}</details>`:''}`};
+function addInj(){D.inj.push({id:uid(),area:val('ia'),side:val('is'),kind:val('ik'),note:val('ino'),start:today(),log:{[today()]:+val('iv')},done:false});save();render()}
+function setSev(id){D.inj.find(x=>x.id==id).log[today()]=+$('#sv'+id).value;save();render()}
+function doneInj(id){const i=D.inj.find(x=>x.id==id);i.done=true;i.doneDate=today();save();render()}
+/* ================= WURF- & TRAININGSLOG ================= */
+const ST=['Freiwurf','Mitteldistanz','Dreier','Korbleger','Spiel'];
+const ago=n=>{const d=new Date();d.setDate(d.getDate()-n);return iso(d)};
+const wil=(m,n)=>{const z=1.96,p=m/n,d=1+z*z/n,c=(p+z*z/(2*n))/d,h=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/d;return{p,lo:c-h,hi:c+h}};
+const shotSum=(t,a,b)=>{const l=D.shots.filter(x=>x.type==t&&x.date>=a&&x.date<=b);return{m:l.reduce((x,y)=>x+y.made,0),n:l.reduce((x,y)=>x+y.att,0)}};
+V.wurflog=()=>{const T=today(),o=ST.map(t=>{const c=shotSum(t,ago(29),T),p=shotSum(t,ago(59),ago(30));if(!c.n)return'';const w=wil(c.m,c.n),tr=p.n>=20?(c.m/c.n>p.m/p.n+.03?'🔺':c.m/c.n<p.m/p.n-.03?'🔻':'➖'):'';
+return `<div class=item><span>${t} <small>${c.m}/${c.n}</small></span><span><b>${Math.round(w.p*100)} %</b> <small>(${Math.round(w.lo*100)}–${Math.round(w.hi*100)} %)</small> ${tr}</span></div>`}).join('');
+return `<div class=card><b>Würfe eintragen</b><div class=row><input id=sd type=date value="${T}"><select id=st>${ST.map(x=>`<option>${x}</option>`).join('')}</select></div><div class=row><input id=sa type=number placeholder="Versuche"><input id=sm type=number placeholder="Treffer"></div><button onclick="addShot()">Speichern</button></div>
+<div class=card><b>Quote – letzte 30 Tage</b>${o||'<p><small>Noch keine Würfe.</small></p>'}<small>Bereich in Klammern = Unsicherheit. Pfeil = Vergleich mit den 30 Tagen davor.</small></div>
+<div class=card><b>Letzte Einträge</b>${[...D.shots].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,8).map(x=>`<div class=item><span>${x.date.slice(5)} · ${x.type} <small>${x.made}/${x.att}</small></span><button onclick="D.shots=D.shots.filter(y=>y.id!='${x.id}');save();render()">✕</button></div>`).join('')||'<small>Leer.</small>'}</div>
+<h2><span class=hd>Trainingsnotizen</span></h2><div class=card><input id=tn placeholder="Fokus / Titel (z.B. Wurf aus dem Dribbling)"><textarea id=tx rows=3 placeholder="Was lief gut? Was übe ich nächstes Mal?"></textarea><button onclick="addTl()">Notiz speichern</button></div>
+${[...D.tlog].reverse().slice(0,8).map(x=>`<div class=card><b>${esc(x.t)}</b> <small>${x.date.slice(5)}</small><p>${esc(x.x)}</p><button onclick="D.tlog=D.tlog.filter(y=>y.id!='${x.id}');save();render()">✕</button></div>`).join('')}`};
+function addShot(){const a=+val('sa'),m=+val('sm');if(!a||m<0||m>a)return alert('Treffer dürfen nicht höher als die Versuche sein');D.shots.push({id:uid(),date:val('sd')||today(),type:val('st'),att:a,made:m});save();render()}
+function addTl(){const t=val('tn');if(!t)return;D.tlog.push({id:uid(),date:today(),t,x:val('tx')});save();render()}
+/* ================= AUFGABEN ================= */
+V.aufgaben=()=>{const open=D.tasks.filter(t=>!t.done).sort((a,b)=>a.date.localeCompare(b.date)),T=today();
+return `<div class=card><input id=ak placeholder="Aufgabe (z.B. Referat Geschichte)"><input id=af placeholder="Fach (optional)"><div class=row><input id=ad type=date value="${sel>=T?sel:T}"><select id=am>${[15,30,45,60,90,120,180,240,360].map(m=>`<option value=${m} ${m==60?'selected':''}>${m} Min Aufwand</option>`).join('')}</select></div><button onclick="addTask()">Aufgabe hinzufügen</button></div>
+<div class=card>${open.map(t=>{const d=dd(t.date,T);return `<div class=item><span>${esc(t.t)} <small>${esc(t.subj||'')} · ${t.min} min<br>${t.date.slice(5)} · ${d<0?'<b>überfällig</b>':d==0?'heute':'in '+d+' Tagen'}</small></span><span><button onclick="doneTask('${t.id}')">✔</button> <button onclick="D.tasks=D.tasks.filter(x=>x.id!='${t.id}');save();render()">✕</button></span></div>`}).join('')||'<small>Keine offenen Aufgaben 🎉</small>'}</div>
+${D.tasks.some(t=>t.done)?`<details class=card><summary>Erledigt (${D.tasks.filter(t=>t.done).length})</summary>${D.tasks.filter(t=>t.done).slice(-10).map(t=>`<div class=item><span class=done>${esc(t.t)}</span></div>`).join('')}</details>`:''}`};
+function addTask(){const t=val('ak');if(!t||!val('ad'))return;D.tasks.push({id:uid(),t,subj:val('af'),date:val('ad'),min:+val('am'),done:false});save();render()}
+function doneTask(id){const t=D.tasks.find(x=>x.id==id);t.done=true;t.doneDate=today();save();render()}
+/* ================= LISTEN ================= */
+function listPage(key,ph,extra=''){return `<div class=card><div class=row><input id=li placeholder="${ph}"><button onclick="addL('${key}')">＋</button></div>${extra}</div><div class=card>${D[key].map((x,i)=>`<div class=item><span class="${x.done?'done':''}" onclick="doneL('${key}',${i})">${esc(x.t)}${x.k?` <small>${x.k}</small>`:''}</span><button onclick="D.${key}.splice(${i},1);save();render()">✕</button></div>`).join('')||'<small>Leer.</small>'}</div>`}
+function addL(k){const t=val('li');if(!t)return;const o={t};if($('#lk'))o.k=val('lk');D[k].push(o);save();render()}
+function doneL(k,i){D[k][i].done=!D[k][i].done;save();render()}
+V.think=()=>`<div class=card>Kopf leeren – Gedanken, Sorgen, Ideen. Nichts muss sofort gelöst werden.</div>`+listPage('think','Was beschäftigt dich?');
+V.einkauf=()=>{const ev=D.events.flatMap(e=>(e.list||[]).map((x,i)=>({e,x,i})).filter(o=>o.x.k=='Einkauf'&&!o.x.done&&o.e.date>=today())).sort((a,b)=>a.e.date.localeCompare(b.e.date));
+return listPage('shop','Artikel')+`<button onclick="D.shop=D.shop.filter(x=>!x.done);save();render()">Erledigte entfernen</button>`+(ev.length?`<h2><span class=hd>Für Termine</span></h2><div class=card>${ev.map(o=>`<div class=item><span onclick="togEv('${o.e.id}',${o.i})">☐ ${esc(o.x.t)} <small>${o.e.date.slice(5)} · ${esc(o.e.title)}</small></span></div>`).join('')}</div>`:'')};
+V.wishes=()=>listPage('wishes','Aktivität oder Wunsch','<select id=lk><option>Aktivität<option>Wunsch</select>')+`<button onclick="go('check')">Passt das in meine Woche? →</button>`;
+const WP=['🌬️ Atmen 4-7-8 (3 Min)','🚶 Spaziergang','🤸 Dehnen / Mobility','🚿 Kalt duschen','📓 Journaling','🎧 Musik hören','🧘 Meditation (10 Min)','😴 Powernap 20 Min'];
+const wAll=()=>[...WP.map(t=>({t})),...D.wellness.map((x,i)=>({t:x.t,i}))];
+function logW(k){D.wlog.push({date:today(),t:wAll()[k].t});save();render()}
+V.wellness=()=>{const t=today();return `<div class=card>Mit ＋ loggst du, was du gemacht hast.</div>`+wAll().map((w,k)=>`<div class="card item"><span>${esc(w.t)}</span><span class=row style="flex:none"><button onclick="logW(${k})">＋ ${D.wlog.filter(x=>x.date==t&&x.t==w.t).length||''}</button>${w.i!=null?`<button onclick="D.wellness.splice(${w.i},1);save();render()">✕</button>`:''}</span></div>`).join('')+`<div class=card><div class=row><input id=li placeholder="Eigene Aktivität hinzufügen"><button onclick="addL('wellness')">＋</button></div></div>`};
+/* ================= TRAININGSPLAN ================= */
+V.training=()=>`<div class=card><select id=tw>${[1,2,3,4,5,6,0].map(i=>`<option value=${i}>${WD[i]}`).join('')}</select><input id=tt placeholder="z.B. Team-Training, Kraft, Wurf"><input id=td type=number placeholder="Minuten" value=90><small>Die Anstrengung (RPE) trägst du nach jedem Training ein.</small><br><button style="margin-top:8px" onclick="addT()">Zum Wochenplan</button></div>
+${[1,2,3,4,5,6,0].map(w=>{const l=D.train.map((t,i)=>[t,i]).filter(x=>x[0].wd==w);return l.length?`<div class=card><b>${WD[w]}</b>${l.map(([t,i])=>`<div class=item><span>${esc(t.title)} <small>${t.dur} min · Ø RPE ≈ ${est(t.title).toFixed(1)}</small></span><button onclick="D.train.splice(${i},1);save();render()">✕</button></div>`).join('')}</div>`:''}).join('')}`;
+function addT(){const t=val('tt');if(!t)return;D.train.push({id:uid(),wd:+val('tw'),title:t,dur:+val('td')||60});save();render()}
+/* ================= ROUTINEN ================= */
+V.routinen=()=>{const t=today();return `<div class=card><div class=row><input id=li placeholder="Neue Routine"><button onclick="addR()">＋</button></div></div>`+D.routines.map(r=>{let st=0;const d=new Date();if(!r.log[iso(d)])d.setDate(d.getDate()-1);while(r.log[iso(d)]){st++;d.setDate(d.getDate()-1)}
+const dots=[...Array(7)].map((_,i)=>{const x=new Date();x.setDate(x.getDate()-6+i);return r.log[iso(x)]?'🟠':'⚪'}).join('');
+return `<div class=card><div class=item><b>${esc(r.t)}</b><button onclick="tog('${r.id}')">${r.log[t]?'✔ heute':'○ heute'}</button></div><small>${dots} · Serie: ${st} Tage</small> <button onclick="D.routines=D.routines.filter(x=>x.id!='${r.id}');save();render()">✕</button></div>`}).join('')};
+function addR(){const t=val('li');if(!t)return;D.routines.push({id:uid(),t,log:{}});save();render()}
+function tog(id){const r=D.routines.find(x=>x.id==id);r.log[today()]=!r.log[today()];save();render()}
+/* ================= PUTZPLAN (Test) ================= */
+const CP=['Zimmer saugen|7','Bad putzen|7','Bettwäsche wechseln|14','Schreibtisch aufräumen|3','Sporttasche auslüften|3','Müll rausbringen|3'];
+function cdue(c){if(!c.last)return today();const b=new Date(c.last+'T12:00');b.setDate(b.getDate()+c.every);return iso(b)}
+V.putzplan=()=>{const T=today(),l=[...D.clean].sort((a,b)=>cdue(a).localeCompare(cdue(b)));
+return `<div class=card><span class=badge>Testversion</span><div class=row style="margin-top:6px"><input id=ct placeholder="Aufgabe"><select id=ce>${[1,2,3,7,14,30].map(n=>`<option value=${n} ${n==7?'selected':''}>alle ${n} Tage</option>`).join('')}</select><button onclick="addC()">＋</button></div>
+<small>Vorschläge:</small><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${CP.map(p=>`<button onclick="addCP('${p}')">${p.split('|')[0]}</button>`).join('')}</div></div>
+<div class=card>${l.map(c=>{const d=dd(cdue(c),T);return `<div class=item><span>${esc(c.t)} <small>alle ${c.every} Tage · ${d<0?'<b>'+(-d)+' Tage überfällig</b>':d==0?'<b>heute fällig</b>':'in '+d+' Tagen'}</small></span><span><button onclick="doneC('${c.id}')">✔</button> <button onclick="D.clean=D.clean.filter(x=>x.id!='${c.id}');save();render()">✕</button></span></div>`}).join('')||'<small>Noch leer.</small>'}</div>`};
+function addC(){const t=val('ct');if(!t)return;D.clean.push({id:uid(),t,every:+val('ce')});save();render()}
+function addCP(p){const[t,e]=p.split('|');D.clean.push({id:uid(),t,every:+e});save();render()}
+function doneC(id){D.clean.find(x=>x.id==id).last=today();save();render()}
+/* ================= PASST DAS NOCH REIN? ================= */
+let CK={min:60,type:'training',lvl:6};
+V.check=()=>{const isT=CK.type=='training',o=(v,l,c)=>`<option value="${v}" ${c==v?'selected':''}>${l}`;
+const rows=[...Array(7)].map((_,i)=>{const d=new Date();d.setDate(d.getDate()+i);const s=iso(d),ex=isT?{[s]:CK.min*CK.lvl}:null,em=isT?0:CK.min*(CK.type=='schule'?1:.3),r0=ser()[s],r1=isT?mkSeries(ex)[s]:r0,p=isT?pst(s,ex):pst(s),m=mst(s,em),L=Math.max(p,m),cp=600*mult(s);
+return{d,L,html:`<div class=card><div class=item style="border:0;padding:0"><b>${d.toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'numeric'})}</b><span>${DOT[L]} ${['Passt','Wird eng','Zu viel'][L]}</span></div>
+<small>Körper ${DOT[p]}: ${r0.acwr!=null?`ACWR ${r0.acwr.toFixed(2)} → <b>${r1.acwr.toFixed(2)}</b>`:`Last ${Math.round(r0.au)} → <b>${Math.round(r1.au)}</b> AU`}<br>Kopf ${DOT[m]}: ${Math.round(ment(s)/cp*100)} % → <b>${Math.round((ment(s)+em)/cp*100)} %</b></small></div>`}});
+const g=rows.filter(x=>x.L==0).map(x=>WD[x.d.getDay()]),y=rows.filter(x=>x.L==1).map(x=>WD[x.d.getDay()]);
+const sum=g.length?`🟢 Passt gut am: <b>${g.join(', ')}</b>`+(y.length?`<br>🟡 Nur knapp: ${y.join(', ')}`:''):y.length?`🟡 Nur knapp möglich am: <b>${y.join(', ')}</b>`:'🔴 In den nächsten 7 Tagen ist dafür kein Platz – lieber verschieben oder kürzen.';
+return `<div class=card>Du willst noch etwas einbauen? Wähle aus, was und wie lange – ich rechne durch, an welchem Tag es noch passt.</div>
+<div class=card><label>Was?<select onchange="CK.type=this.value;render()">${o('training','Training',CK.type)}${o('schule','Lernen / Schule',CK.type)}${o('sonstiges','Sonstiges',CK.type)}</select></label>
+<label>Wie lange?<select onchange="CK.min=+this.value;render()">${[15,30,45,60,90,120,180].map(m=>o(m,m+' Minuten',CK.min)).join('')}</select></label>
+${isT?`<label>Wie hart?<select onchange="CK.lvl=+this.value;render()">${o(3,'Locker (RPE 3)',CK.lvl)}${o(6,'Mittel (RPE 6)',CK.lvl)}${o(8,'Hart (RPE 8)',CK.lvl)}${o(10,'Maximal (RPE 10)',CK.lvl)}</select></label>`:''}</div>
+<div class=card>${sum}</div>${rows.map(x=>x.html).join('')}`};
+/* ================= WOCHENBERICHT ================= */
+function wk(o){const d=new Date();d.setDate(d.getDate()-((d.getDay()+6)%7)+o*7);const days=[];for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()+i);days.push(iso(x))}
+const S=ser(),au=days.map(s=>S[s]?S[s].au:phys0(s)),L=au.reduce((a,b)=>a+b,0),mu=L/7,sd=Math.sqrt(au.reduce((a,b)=>a+(b-mu)**2,0)/7),T=today(),past=days.filter(s=>s<=T),le=past.length?past[past.length-1]:null;
+const cs=days.map(comp).filter(v=>v!=null),hs=days.map(s=>(D.checks[s]||{}).h).filter(Boolean),rs=[];
+days.forEach(s=>trainingsOn(s).forEach(t=>{if(D.rpe[t.key]&&D.rpe[t.key].v>0)rs.push(D.rpe[t.key].v)}));
+const av=a=>a.length?a.reduce((x,y)=>x+y)/a.length:0;
+return{s:days[0],L,mono:sd>0?mu/sd:null,acwr:le&&S[le]?S[le].acwr:null,rd:av(cs),sl:av(hs),men:days.reduce((a,s)=>a+ment(s),0)/60,tr:days.reduce((a,s)=>a+trainingsOn(s).length+D.klogs.filter(x=>x.date==s).length,0),rpe:av(rs),rhr:av(days.map(s=>(D.checks[s]||{}).rhr).filter(Boolean)),sn:D.shots.filter(x=>days.includes(x.date)).reduce((a,x)=>a+x.att,0),sm:D.shots.filter(x=>days.includes(x.date)).reduce((a,x)=>a+x.made,0),
+rt:D.routines.length?D.routines.reduce((a,r)=>a+days.filter(s=>r.log[s]).length,0)/(D.routines.length*7):0,w:D.wlog.filter(x=>days.includes(x.date)).length,tk:D.tasks.filter(t=>t.done&&days.includes(t.doneDate)).length}}
+V.bericht=()=>{const a=wk(0),b=wk(-1),ar=(x,y,up=1)=>!x||!y?'':x>y*1.05?(up?'🔺':'🔻'):x<y*.95?(up?'🔻':'🔺'):'➖';
+const tips=[],ramp=b.L?(a.L-b.L)/b.L:0,bs=base(today());
+if(a.mono&&a.mono>2&&a.L>0)tips.push(`Monotonie ${a.mono.toFixed(1)} (über 2,0): Wechsle harte und leichte Tage stärker ab (Foster 1998).`);
+if(b.L>0&&ramp>.15)tips.push(`Wochenlast ${Math.round(ramp*100)} % höher als letzte Woche – Faustregel: höchstens etwa 10–15 % Steigerung.`);
+if(a.acwr&&a.acwr>1.3)tips.push(`ACWR ${a.acwr.toFixed(2)} – du bist über deinem Zielbereich (0,8–1,3). Nächste Tage eher entlasten.`);
+if(a.sl&&a.sl<8)tips.push(`Schlaf im Schnitt ${a.sl.toFixed(1)} h – für Jugendliche Leistungssportler werden 8–10 h empfohlen; unter 8 h war in einer Studie mit mehr Verletzungen verbunden (Milewski 2014).`);
+if(bs&&a.rd&&a.rd<bs.m-bs.sd)tips.push('Dein Befinden liegt klar unter deinem eigenen Durchschnitt – Erholung vor zusätzlichen Terminen.');
+if(a.men>50)tips.push(`Kopf-Last ${a.men.toFixed(0)} h in der Woche – plane bewusst freie Abende ein.`);
+if(a.rhr&&b.rhr&&a.rhr-b.rhr>=4)tips.push(`Ruhepuls im Schnitt ${Math.round(a.rhr-b.rhr)} bpm höher als letzte Woche – ein Hinweis auf Müdigkeit oder Infekt, aber nur ein Hinweis.`);
+const ai=D.inj.filter(i=>!i.done&&curSev(i)>=4);if(ai.length)tips.push(`Aktive Beschwerden (${ai.map(i=>i.area).join(', ')}): Belastung anpassen und Trainer oder Physio informieren.`);
+if(!tips.length)tips.push('Gute Balance – so weitermachen.');
+const W=[-5,-4,-3,-2,-1,0].map(wk),mx=Math.max(1,...W.map(x=>x.L)),R=(l,v,t)=>`<div class=item><span>${l}</span><span>${v} ${t||''}</span></div>`;
+return `<div class=card><b>Diese Woche (ab ${a.s.slice(5)})</b>${R('Wochenlast (AU)',Math.round(a.L),ar(a.L,b.L))}${R('Monotonie',a.mono?a.mono.toFixed(1):'–',ar(a.mono,b.mono,0))}${R('ACWR (Stand)',a.acwr?a.acwr.toFixed(2):'–',a.acwr?acTxt(a.acwr):'')}${R('Trainings',a.tr,ar(a.tr,b.tr))}${R('Anstrengung Ø (RPE)',a.rpe?a.rpe.toFixed(1):'–',ar(a.rpe,b.rpe,0))}${R('Befinden Ø (0–100)',a.rd?Math.round(a.rd):'–',ar(a.rd,b.rd))}${R('Schlaf Ø',a.sl?a.sl.toFixed(1)+' h':'–',ar(a.sl,b.sl))}${R('Ruhepuls Ø',a.rhr?Math.round(a.rhr)+' bpm':'–',ar(a.rhr,b.rhr,0))}${R('Würfe · Quote',a.sn?a.sn+' · '+Math.round(100*a.sm/a.sn)+' %':'–')}${R('Aktive Beschwerden',D.inj.filter(i=>!i.done).length)}${R('Kopf-Last',a.men.toFixed(1)+' h',ar(a.men,b.men,0))}${R('Aufgaben erledigt',a.tk)}${R('Routinen erfüllt',Math.round(a.rt*100)+'%',ar(a.rt,b.rt))}${R('Wellness',a.w,ar(a.w,b.w))}</div>
+<div class=card><b>💡 Auswertung</b>${tips.slice(0,4).map(t=>`<p>• ${t}</p>`).join('')}</div>
+<h2><span class=hd>Trend (6 Wochen)</span></h2><div class=card>${W.map(x=>`<div style="margin:8px 0"><small>${x.s.slice(5)} · Last ${Math.round(x.L)} AU · Befinden ${x.rd?Math.round(x.rd):'–'} · Kopf ${x.men.toFixed(0)} h</small><div class=bar style="width:${x.L/mx*100}%;background:#7fd3ff"></div></div>`).join('')}</div>`}
+render();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script></body></html>
